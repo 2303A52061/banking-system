@@ -1,111 +1,159 @@
-import React, { useState, useEffect } from "react";
-import { PieChart, Pie, Cell, Tooltip } from "recharts";
+// BankingApp.jsx
+// Features: Observer, Strategy, Command, Factory, State
+// Extras: Loan Apply/Approve/Reject with undo, EMI strategies,
+// FD calculator, Bill payments, Spending analytics
 
-/******************* OBSERVER PATTERN *******************/
+import React, { useState, useEffect } from "react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend
+} from "recharts";
+
+/**************** OBSERVER PATTERN (Notification Center) ****************/
 class NotificationCenter {
   constructor() {
     this.subscribers = [];
   }
-  subscribe(callback) {
-    this.subscribers.push(callback);
+  subscribe(fn) {
+    this.subscribers.push(fn);
+    return () => {
+      this.subscribers = this.subscribers.filter((s) => s !== fn);
+    };
   }
   notify(message) {
-    this.subscribers.forEach((cb) => cb(message));
+    this.subscribers.forEach((fn) => fn(message));
   }
 }
 const notificationCenter = new NotificationCenter();
 
-/******************* STRATEGY PATTERN *******************/
+/**************** STRATEGY PATTERN (EMI calculation strategies) ****************/
 const EMIStrategies = {
-  flatRate: (amount, rate, term) =>
-    ((amount * rate * term) / 100 + amount) / (term * 12),
-  reducingBalance: (amount, rate, term) => {
-    let monthlyRate = rate / 12 / 100;
-    return (
-      (amount * monthlyRate * Math.pow(1 + monthlyRate, term * 12)) /
-      (Math.pow(1 + monthlyRate, term * 12) - 1)
-    );
+  reducingBalance: (principal, annualRatePercent, months) => {
+    const r = annualRatePercent / 100 / 12;
+    const n = months;
+    if (!r || n === 0) return principal / n || 0;
+    const emi =
+      (principal * r * Math.pow(1 + r, n)) /
+      (Math.pow(1 + r, n) - 1);
+    return emi;
   },
+  flatRate: (principal, annualRatePercent, months) => {
+    const totalInterest =
+      (principal * (annualRatePercent / 100) * (months / 12));
+    const total = principal + totalInterest;
+    return total / months;
+  }
 };
 
-/******************* COMMAND PATTERN *******************/
+/**************** COMMAND PATTERN (Approve/Reject with undo) ****************/
 class CommandInvoker {
   constructor() {
     this.history = [];
   }
-  execute(command) {
-    command.execute();
-    this.history.push(command);
+  execute(cmd) {
+    cmd.execute();
+    this.history.push(cmd);
   }
   undo() {
-    const command = this.history.pop();
-    if (command) command.undo();
-  }
-}
-class ApproveLoanCommand {
-  constructor(loan, setLoans) {
-    this.loan = loan;
-    this.setLoans = setLoans;
-  }
-  execute() {
-    this.setLoans((prev) =>
-      prev.map((l) =>
-        l.id === this.loan.id ? { ...l, status: "Approved" } : l
-      )
-    );
-    notificationCenter.notify(`Loan ${this.loan.id} Approved.`);
-  }
-  undo() {
-    this.setLoans((prev) =>
-      prev.map((l) => (l.id === this.loan.id ? { ...l, status: "Pending" } : l))
-    );
-  }
-}
-class RejectLoanCommand {
-  constructor(loan, setLoans) {
-    this.loan = loan;
-    this.setLoans = setLoans;
-  }
-  execute() {
-    this.setLoans((prev) =>
-      prev.map((l) =>
-        l.id === this.loan.id ? { ...l, status: "Rejected" } : l
-      )
-    );
-    notificationCenter.notify(`Loan ${this.loan.id} Rejected.`);
-  }
-  undo() {
-    this.setLoans((prev) =>
-      prev.map((l) => (l.id === this.loan.id ? { ...l, status: "Pending" } : l))
-    );
+    const cmd = this.history.pop();
+    if (cmd && typeof cmd.undo === "function") cmd.undo();
   }
 }
 const invoker = new CommandInvoker();
 
-/******************* FACTORY PATTERN *******************/
+class UpdateLoanCommand {
+  constructor(getLoans, setLoans, loanId, newStatus, newStateName, remark) {
+    this.getLoans = getLoans;
+    this.setLoans = setLoans;
+    this.loanId = loanId;
+    this.newStatus = newStatus;
+    this.newStateName = newStateName;
+    this.remark = remark || "";
+    this.prevSnapshot = null;
+  }
+  execute() {
+    const loans = this.getLoans();
+    const loan = loans.find((l) => l.id === this.loanId);
+    if (!loan) return;
+    this.prevSnapshot = { ...loan };
+    this.setLoans((prev) =>
+      prev.map((l) =>
+        l.id === this.loanId
+          ? {
+              ...l,
+              status: this.newStatus,
+              stateName: this.newStateName,
+              remark: this.remark
+            }
+          : l
+      )
+    );
+    notificationCenter.notify(`Loan ${this.loanId} -> ${this.newStatus}`);
+  }
+  undo() {
+    if (!this.prevSnapshot) return;
+    this.setLoans((prev) =>
+      prev.map((l) => (l.id === this.loanId ? { ...this.prevSnapshot } : l))
+    );
+    notificationCenter.notify(
+      `Undo: Loan ${this.loanId} reverted to ${this.prevSnapshot.status}`
+    );
+  }
+}
+
+/**************** FACTORY PATTERN (Account creation) ****************/
 class AccountFactory {
-  static createAccount(type, balance) {
+  static create(type, initialBalance = 0) {
     switch (type) {
       case "Savings":
-        return { type, balance, interest: 4 };
+        return {
+          id: `acc-${Date.now()}`,
+          type: "Savings",
+          balance: initialBalance,
+          interestPercent: 3.5
+        };
       case "Current":
-        return { type, balance, overdraft: true };
+        return {
+          id: `acc-${Date.now()}`,
+          type: "Current",
+          balance: initialBalance,
+          overdraft: true
+        };
       case "FD":
-        return { type, balance, lockIn: 12 };
+        return {
+          id: `acc-${Date.now()}`,
+          type: "FD",
+          balance: initialBalance,
+          lockMonths: 12
+        };
       case "RD":
-        return { type, balance, monthly: true };
+        return {
+          id: `acc-${Date.now()}`,
+          type: "RD",
+          balance: initialBalance,
+          monthly: true
+        };
       default:
-        return { type: "General", balance };
+        return {
+          id: `acc-${Date.now()}`,
+          type: "General",
+          balance: initialBalance
+        };
     }
   }
 }
 
-/******************* STATE PATTERN *******************/
+/**************** STATE PATTERN (Loan lifecycle states) ****************/
 class LoanState {
   constructor(name) {
     this.name = name;
   }
-  next() {}
+  next() {
+    return this;
+  }
 }
 class PendingState extends LoanState {
   constructor() {
@@ -137,155 +185,283 @@ class ClosedState extends LoanState {
   }
 }
 
-/******************* MAIN APP *******************/
+/**************** React Component ****************/
 export default function BankingApp() {
-  const [userType, setUserType] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [loans, setLoans] = useState([]);
-  const [accounts] = useState([AccountFactory.createAccount("Savings", 10000)]);
-  const [expenses, setExpenses] = useState([
-    { category: "Food", amount: 3000 },
-    { category: "Transport", amount: 1500 },
-    { category: "Bills", amount: 2000 },
-  ]);
+  const [username, setUsername] = useState("");
+  const [userType, setUserType] = useState(null); // 'user' or 'admin'
 
+  const [notifications, setNotifications] = useState([]);
   useEffect(() => {
-    notificationCenter.subscribe((msg) =>
-      setNotifications((prev) => [...prev, msg])
+    const unsub = notificationCenter.subscribe((msg) =>
+      setNotifications((prev) => [msg, ...prev].slice(0, 20))
     );
+    return () => unsub();
   }, []);
 
-  const applyLoan = (amount, rate, term, type) => {
-    const newLoan = {
-      id: loans.length + 1,
-      amount,
-      rate,
-      term,
-      type,
+  const [accounts] = useState([
+    AccountFactory.create("Savings", 25000)
+  ]);
+  const [expenses, setExpenses] = useState([
+    { category: "Food", amount: 2500 },
+    { category: "Transport", amount: 800 },
+    { category: "Bills", amount: 1200 }
+  ]);
+  const [bills, setBills] = useState([]);
+
+  const [loans, setLoans] = useState([]);
+  const getLoans = () => loans;
+
+  const [loanForm, setLoanForm] = useState({
+    type: "Personal",
+    amount: "",
+    termMonths: 12,
+    strategy: "reducingBalance"
+  });
+
+  const calculateEMI = (amount, months, strategyKey) => {
+    const principal = Number(amount) || 0;
+    const n = Number(months) || 0;
+    const annualRate = 10;
+    if (n <= 0) return 0;
+    const fn =
+      EMIStrategies[strategyKey] || EMIStrategies.reducingBalance;
+    return Math.max(0, fn(principal, annualRate, n));
+  };
+
+  const applyLoan = () => {
+    const id = Date.now();
+    const emi = calculateEMI(
+      loanForm.amount,
+      loanForm.termMonths,
+      loanForm.strategy
+    );
+    const now = new Date();
+    const nextDue = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      now.getDate()
+    ).toLocaleDateString();
+    const loan = {
+      id,
+      applicant: username || "Guest",
+      type: loanForm.type,
+      amount: Number(loanForm.amount) || 0,
+      termMonths: Number(loanForm.termMonths) || 0,
+      emi: Number(emi.toFixed(2)),
+      appliedOn: now.toLocaleDateString(),
+      nextDue,
       status: "Pending",
       state: new PendingState(),
+      stateName: "Pending",
+      remark: ""
     };
-    setLoans([...loans, newLoan]);
-    notificationCenter.notify(`New ${type} loan applied.`);
+    setLoans((prev) => [loan, ...prev]);
+    notificationCenter.notify(
+      `Loan applied (ID ${loan.id}) by ${loan.applicant}`
+    );
+    setLoanForm({ ...loanForm, amount: "", termMonths: 12 });
   };
 
-  /******** Bill Payments ********/
-  const [bills, setBills] = useState([]);
+  const approveLoan = (loanId) => {
+    const cmd = new UpdateLoanCommand(
+      getLoans,
+      setLoans,
+      loanId,
+      "Approved",
+      "Approved",
+      "Approved by Admin"
+    );
+    invoker.execute(cmd);
+  };
+  const rejectLoan = (loanId) => {
+    const cmd = new UpdateLoanCommand(
+      getLoans,
+      setLoans,
+      loanId,
+      "Rejected",
+      "Rejected",
+      "Rejected by Admin"
+    );
+    invoker.execute(cmd);
+  };
+  const undoLast = () => invoker.undo();
+
+  const advanceLoanState = (loanId) => {
+    setLoans((prev) =>
+      prev.map((l) => {
+        if (l.id !== loanId) return l;
+        const currState = l.state || new PendingState();
+        const nextState = currState.next();
+        const nextName = nextState.name || l.stateName;
+        const newStatus =
+          nextName === "Disbursed"
+            ? "Disbursed"
+            : nextName === "Closed"
+            ? "Closed"
+            : l.status;
+        notificationCenter.notify(
+          `Loan ${loanId} state -> ${nextName}`
+        );
+        return {
+          ...l,
+          state: nextState,
+          stateName: nextName,
+          status: newStatus
+        };
+      })
+    );
+  };
+
   const payBill = (type, amount) => {
+    const id = Date.now();
     const receipt = {
-      id: bills.length + 1,
+      id,
       type,
       amount,
-      date: new Date().toLocaleString(),
+      date: new Date().toLocaleString()
     };
-    setBills([...bills, receipt]);
-    notificationCenter.notify(`${type} bill of ₹${amount} paid.`);
+    setBills((prev) => [receipt, ...prev]);
+    setExpenses((prev) => [
+      ...prev,
+      { category: type, amount: Number(amount) }
+    ]);
+    notificationCenter.notify(`${type} bill paid: ₹${amount}`);
   };
 
-  /******** FD Calculator ********/
-  const calcFD = (amount, rate, years) =>
-    amount * Math.pow(1 + rate / 100, years);
+  const calculateFD = (principal, annualRatePercent, years) => {
+    const p = Number(principal) || 0;
+    const r = Number(annualRatePercent) || 0;
+    const t = Number(years) || 0;
+    return p * Math.pow(1 + r / 100, t);
+  };
+
+  const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff8042"];
+
+  /********************* UI *********************/
+  if (!userType) {
+    return (
+      <div style={{ padding: "20px" }}>
+        <h2>Banking App - Login</h2>
+        <input
+          placeholder="Enter Name"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <br />
+        <button onClick={() => setUserType("user")}>Login as User</button>
+        <button onClick={() => setUserType("admin")}>Login as Admin</button>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <h1>🏦 Banking Application</h1>
+    <div style={{ padding: "20px" }}>
+      <h2>Welcome {username} ({userType})</h2>
+      <button onClick={() => setUserType(null)}>Logout</button>
 
-      {!userType && (
-        <div>
-          <button onClick={() => setUserType("user")}>Login as User</button>
-          <button onClick={() => setUserType("admin")}>Login as Admin</button>
+      <hr />
+      <h3>Accounts</h3>
+      {accounts.map((a) => (
+        <div key={a.id} className="card">
+          {a.type} Account - Balance: ₹{a.balance}
         </div>
-      )}
+      ))}
 
       {userType === "user" && (
-        <div>
-          <div className="card">
-            <h2>Apply Loan</h2>
-            <button onClick={() => applyLoan(50000, 10, 2, "Home")}>
-              Apply Home Loan
-            </button>
+        <>
+          <hr />
+          <h3>Apply Loan</h3>
+          <input
+            placeholder="Amount"
+            value={loanForm.amount}
+            onChange={(e) =>
+              setLoanForm({ ...loanForm, amount: e.target.value })
+            }
+          />
+          <input
+            placeholder="Term (months)"
+            value={loanForm.termMonths}
+            onChange={(e) =>
+              setLoanForm({ ...loanForm, termMonths: e.target.value })
+            }
+          />
+          <select
+            value={loanForm.strategy}
+            onChange={(e) =>
+              setLoanForm({ ...loanForm, strategy: e.target.value })
+            }
+          >
+            <option value="reducingBalance">Reducing Balance</option>
+            <option value="flatRate">Flat Rate</option>
+          </select>
+          <button onClick={applyLoan}>Apply</button>
+
+          <hr />
+          <h3>Bill Payment</h3>
+          <button onClick={() => payBill("Electricity", 1500)}>
+            Pay Electricity ₹1500
+          </button>
+          <button onClick={() => payBill("Mobile", 500)}>
+            Pay Mobile ₹500
+          </button>
+
+          <hr />
+          <h3>FD Calculator</h3>
+          <div>
+            Example: ₹10,000 for 3 years @6% = ₹
+            {calculateFD(10000, 6, 3).toFixed(2)}
           </div>
 
-          <div className="card">
-            <h2>Bill Payments</h2>
-            <button onClick={() => payBill("Electricity", 1500)}>
-              Pay Electricity
-            </button>
-            <button onClick={() => payBill("Mobile", 500)}>Pay Mobile</button>
-            <ul>
-              {bills.map((b) => (
-                <li key={b.id}>
-                  {b.type} ₹{b.amount} ({b.date})
-                </li>
+          <hr />
+          <h3>Spending Analytics</h3>
+          <PieChart width={400} height={300}>
+            <Pie
+              data={expenses}
+              dataKey="amount"
+              nameKey="category"
+              outerRadius={100}
+              fill="#8884d8"
+              label
+            >
+              {expenses.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={COLORS[index % COLORS.length]}
+                />
               ))}
-            </ul>
-          </div>
-
-          <div className="card">
-            <h2>FD Calculator</h2>
-            <p>
-              ₹10,000 for 3 years @ 6% → ₹{calcFD(10000, 6, 3).toFixed(0)}
-            </p>
-          </div>
-
-          <div className="card">
-            <h2>Spending Analytics</h2>
-            <PieChart width={300} height={200}>
-              <Pie
-                data={expenses}
-                dataKey="amount"
-                nameKey="category"
-                outerRadius={80}
-              >
-                {expenses.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={["#8884d8", "#82ca9d", "#ffc658"][index]}
-                  />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </div>
-        </div>
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        </>
       )}
 
       {userType === "admin" && (
-        <div>
-          <h2>Admin Loan Management</h2>
+        <>
+          <hr />
+          <h3>Loan Management</h3>
+          <button onClick={undoLast}>Undo Last Action</button>
           {loans.map((loan) => (
-            <div className="card" key={loan.id}>
-              <p>
-                Loan {loan.id}: {loan.type} ₹{loan.amount} ({loan.status})
-              </p>
-              <button
-                onClick={() =>
-                  invoker.execute(new ApproveLoanCommand(loan, setLoans))
-                }
-              >
-                Approve
-              </button>
-              <button
-                onClick={() =>
-                  invoker.execute(new RejectLoanCommand(loan, setLoans))
-                }
-              >
-                Reject
+            <div key={loan.id} className="card">
+              <b>{loan.type}</b> Loan ₹{loan.amount} by {loan.applicant} <br />
+              Status: {loan.status}, State: {loan.stateName}, EMI: ₹{loan.emi} <br />
+              <button onClick={() => approveLoan(loan.id)}>Approve</button>
+              <button onClick={() => rejectLoan(loan.id)}>Reject</button>
+              <button onClick={() => advanceLoanState(loan.id)}>
+                Next State
               </button>
             </div>
           ))}
-          <button onClick={() => invoker.undo()}>Undo Last Action</button>
-        </div>
+        </>
       )}
 
-      <div className="card">
-        <h2>Notifications</h2>
-        <ul>
-          {notifications.map((n, i) => (
-            <li key={i}>{n}</li>
-          ))}
-        </ul>
-      </div>
+      <hr />
+      <h3>Notifications</h3>
+      <ul>
+        {notifications.map((n, i) => (
+          <li key={i}>{n}</li>
+        ))}
+      </ul>
     </div>
   );
 }
