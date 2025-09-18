@@ -2,36 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Banking App Demo</title>
+  <title>BlueRiver Bank Demo</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    /* Professional theme colors */
     :root {
       --primary: #1E40AF; /* Dark blue */
       --secondary: #2563EB; /* Blue */
       --bg: #F3F4F6; /* Light gray */
       --card-bg: #FFFFFF; /* White */
-      --text-dark: #111827; /* Almost black */
-      --text-light: #6B7280; /* Gray */
-      --success: #16A34A; /* Green */
-      --danger: #DC2626; /* Red */
-      --accent: #F59E0B; /* Orange */
+      --text-dark: #111827;
+      --text-light: #6B7280;
+      --success: #16A34A;
+      --danger: #DC2626;
+      --accent: #F59E0B;
     }
 
-    body {
-      font-family: Arial, sans-serif;
-      background: var(--bg);
-      margin:0; padding:0;
-      color: var(--text-dark);
-    }
+    body { font-family: Arial, sans-serif; background: var(--bg); margin:0; padding:0; color: var(--text-dark); }
 
     header {
-      background: var(--primary);
-      color: white;
-      padding: 15px 20px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
+      background: var(--primary); color:white; padding:15px 20px;
+      display:flex; justify-content:space-between; align-items:center;
       box-shadow:0 2px 4px rgba(0,0,0,0.1);
     }
 
@@ -40,64 +30,57 @@
     .container { max-width:1200px; margin:auto; padding:20px; }
 
     .card {
-      background: var(--card-bg);
-      padding:20px;
-      border-radius:10px;
-      margin-bottom:20px;
+      background: var(--card-bg); padding:20px;
+      border-radius:10px; margin-bottom:20px;
       box-shadow:0 4px 10px rgba(0,0,0,0.05);
     }
 
-    button {
-      padding:6px 12px;
-      border:none;
-      border-radius:5px;
-      cursor:pointer;
-      font-weight:bold;
-    }
+    input, select { padding:8px; margin:5px 0; width:100%; border:1px solid #D1D5DB; border-radius:5px; font-size:0.95em; }
+
+    button { padding:6px 12px; border:none; border-radius:5px; cursor:pointer; font-weight:bold; }
 
     .btn-primary { background: var(--secondary); color:white; }
     .btn-danger { background: var(--danger); color:white; }
     .btn-success { background: var(--success); color:white; }
 
-    input, select {
-      padding:8px;
-      margin:5px 0;
-      width:100%;
-      border:1px solid #D1D5DB;
-      border-radius:5px;
-      font-size:0.95em;
-    }
-
     .flex { display:flex; gap:10px; flex-wrap:wrap; }
 
-    .notification {
-      background:#E5E7EB;
-      padding:6px 10px;
-      margin:3px 0;
-      border-radius:5px;
-      font-size:0.9em;
-      color: var(--text-dark);
-    }
-
-    ul { list-style:none; padding:0; }
-    li { margin:5px 0; }
+    .notification { background:#E5E7EB; padding:6px 10px; margin:3px 0; border-radius:5px; font-size:0.9em; }
 
     h2 { color: var(--primary); margin-bottom:10px; }
+
+    /* Login page styling */
+    #loginPage { display:flex; align-items:center; justify-content:center; height:100vh; }
+    #loginPage .card { max-width:400px; width:100%; text-align:center; }
   </style>
 </head>
 <body>
 
-<header>
-  <h1>BlueRiver Bank Demo</h1>
-  <div>
-    <select id="roleSelect">
+<!-- Login Page -->
+<div id="loginPage">
+  <div class="card">
+    <h2>BlueRiver Bank Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <select id="userRole">
       <option value="user">User</option>
       <option value="admin">Admin</option>
     </select>
+    <button class="btn-primary" onclick="login()">Login</button>
   </div>
-</header>
+</div>
 
-<div class="container">
+<!-- Main Container -->
+<div id="mainContainer" class="container" style="display:none;">
+
+  <header>
+    <h1>BlueRiver Bank Dashboard</h1>
+    <div>
+      <select id="roleSelect">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+  </header>
 
   <!-- User Dashboard -->
   <div id="userDashboard">
@@ -147,14 +130,40 @@
 </div>
 
 <script>
-  // Data storage
+  let currentUser = null;
   let accounts = [{id:'acc1', name:'Savings', balance:50000}];
   let loans = [];
   let bills = [];
   let notifications = [];
   let commandHistory = [];
 
-  // Update account list
+  // Login
+  function login() {
+    const username = document.getElementById('username').value.trim();
+    const role = document.getElementById('userRole').value;
+    if(!username) return alert('Enter username');
+    currentUser = {name:username, role};
+    document.getElementById('loginPage').style.display='none';
+    document.getElementById('mainContainer').style.display='block';
+    document.getElementById('roleSelect').value=role;
+    toggleDashboard();
+    renderAccounts();
+    renderLoanRequests();
+    renderChart();
+    notify(`Welcome ${username} (${role})`);
+  }
+
+  // Toggle dashboards
+  document.getElementById('roleSelect').addEventListener('change', e=>{
+    toggleDashboard();
+  });
+
+  function toggleDashboard(){
+    const role = document.getElementById('roleSelect').value;
+    document.getElementById('userDashboard').style.display = role==='user'?'block':'none';
+    document.getElementById('adminDashboard').style.display = role==='admin'?'block':'none';
+  }
+
   function renderAccounts() {
     const ul = document.getElementById('accountList');
     ul.innerHTML = '';
@@ -165,7 +174,6 @@
     });
   }
 
-  // Notifications (Observer pattern)
   function notify(msg) {
     notifications.unshift(msg);
     if(notifications.length>10) notifications.pop();
@@ -179,7 +187,6 @@
     });
   }
 
-  // Apply Loan
   function applyLoan() {
     const amt = Number(document.getElementById('loanAmount').value);
     const term = Number(document.getElementById('loanTerm').value);
@@ -190,7 +197,6 @@
     renderLoanRequests();
   }
 
-  // Admin actions (Command pattern)
   function approveLoan(id) {
     const loan = loans.find(l=>l.id===id);
     if(!loan) return;
@@ -219,7 +225,6 @@
     renderLoanRequests();
   }
 
-  // Render loan requests (Admin)
   function renderLoanRequests() {
     const ul = document.getElementById('loanRequests');
     ul.innerHTML = '';
@@ -236,7 +241,6 @@
     });
   }
 
-  // Pay Bill
   function payBill() {
     const type = document.getElementById('billType').value;
     const amt = Number(document.getElementById('billAmount').value);
@@ -245,7 +249,6 @@
     notify(`Bill Paid: ${type} ₹${amt}`);
   }
 
-  // Spending chart
   function renderChart() {
     const ctx = document.getElementById('spendingChart').getContext('2d');
     const data = {
@@ -258,18 +261,6 @@
     };
     new Chart(ctx,{type:'pie',data});
   }
-
-  // Toggle dashboards
-  document.getElementById('roleSelect').addEventListener('change', e=>{
-    const role = e.target.value;
-    document.getElementById('userDashboard').style.display = role==='user'?'block':'none';
-    document.getElementById('adminDashboard').style.display = role==='admin'?'block':'none';
-  });
-
-  // Init
-  renderAccounts();
-  renderChart();
-  renderLoanRequests();
 </script>
 
 </body>
