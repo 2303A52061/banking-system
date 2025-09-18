@@ -1,467 +1,276 @@
-// BankingApp.jsx
-// Features: Observer, Strategy, Command, Factory, State
-// Extras: Loan Apply/Approve/Reject with undo, EMI strategies,
-// FD calculator, Bill payments, Spending analytics
-
-import React, { useState, useEffect } from "react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  Legend
-} from "recharts";
-
-/**************** OBSERVER PATTERN (Notification Center) ****************/
-class NotificationCenter {
-  constructor() {
-    this.subscribers = [];
-  }
-  subscribe(fn) {
-    this.subscribers.push(fn);
-    return () => {
-      this.subscribers = this.subscribers.filter((s) => s !== fn);
-    };
-  }
-  notify(message) {
-    this.subscribers.forEach((fn) => fn(message));
-  }
-}
-const notificationCenter = new NotificationCenter();
-
-/**************** STRATEGY PATTERN (EMI calculation strategies) ****************/
-const EMIStrategies = {
-  reducingBalance: (principal, annualRatePercent, months) => {
-    const r = annualRatePercent / 100 / 12;
-    const n = months;
-    if (!r || n === 0) return principal / n || 0;
-    const emi =
-      (principal * r * Math.pow(1 + r, n)) /
-      (Math.pow(1 + r, n) - 1);
-    return emi;
-  },
-  flatRate: (principal, annualRatePercent, months) => {
-    const totalInterest =
-      (principal * (annualRatePercent / 100) * (months / 12));
-    const total = principal + totalInterest;
-    return total / months;
-  }
-};
-
-/**************** COMMAND PATTERN (Approve/Reject with undo) ****************/
-class CommandInvoker {
-  constructor() {
-    this.history = [];
-  }
-  execute(cmd) {
-    cmd.execute();
-    this.history.push(cmd);
-  }
-  undo() {
-    const cmd = this.history.pop();
-    if (cmd && typeof cmd.undo === "function") cmd.undo();
-  }
-}
-const invoker = new CommandInvoker();
-
-class UpdateLoanCommand {
-  constructor(getLoans, setLoans, loanId, newStatus, newStateName, remark) {
-    this.getLoans = getLoans;
-    this.setLoans = setLoans;
-    this.loanId = loanId;
-    this.newStatus = newStatus;
-    this.newStateName = newStateName;
-    this.remark = remark || "";
-    this.prevSnapshot = null;
-  }
-  execute() {
-    const loans = this.getLoans();
-    const loan = loans.find((l) => l.id === this.loanId);
-    if (!loan) return;
-    this.prevSnapshot = { ...loan };
-    this.setLoans((prev) =>
-      prev.map((l) =>
-        l.id === this.loanId
-          ? {
-              ...l,
-              status: this.newStatus,
-              stateName: this.newStateName,
-              remark: this.remark
-            }
-          : l
-      )
-    );
-    notificationCenter.notify(`Loan ${this.loanId} -> ${this.newStatus}`);
-  }
-  undo() {
-    if (!this.prevSnapshot) return;
-    this.setLoans((prev) =>
-      prev.map((l) => (l.id === this.loanId ? { ...this.prevSnapshot } : l))
-    );
-    notificationCenter.notify(
-      `Undo: Loan ${this.loanId} reverted to ${this.prevSnapshot.status}`
-    );
-  }
-}
-
-/**************** FACTORY PATTERN (Account creation) ****************/
-class AccountFactory {
-  static create(type, initialBalance = 0) {
-    switch (type) {
-      case "Savings":
-        return {
-          id: `acc-${Date.now()}`,
-          type: "Savings",
-          balance: initialBalance,
-          interestPercent: 3.5
-        };
-      case "Current":
-        return {
-          id: `acc-${Date.now()}`,
-          type: "Current",
-          balance: initialBalance,
-          overdraft: true
-        };
-      case "FD":
-        return {
-          id: `acc-${Date.now()}`,
-          type: "FD",
-          balance: initialBalance,
-          lockMonths: 12
-        };
-      case "RD":
-        return {
-          id: `acc-${Date.now()}`,
-          type: "RD",
-          balance: initialBalance,
-          monthly: true
-        };
-      default:
-        return {
-          id: `acc-${Date.now()}`,
-          type: "General",
-          balance: initialBalance
-        };
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Banking App Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Professional theme colors */
+    :root {
+      --primary: #1E40AF; /* Dark blue */
+      --secondary: #2563EB; /* Blue */
+      --bg: #F3F4F6; /* Light gray */
+      --card-bg: #FFFFFF; /* White */
+      --text-dark: #111827; /* Almost black */
+      --text-light: #6B7280; /* Gray */
+      --success: #16A34A; /* Green */
+      --danger: #DC2626; /* Red */
+      --accent: #F59E0B; /* Orange */
     }
-  }
-}
 
-/**************** STATE PATTERN (Loan lifecycle states) ****************/
-class LoanState {
-  constructor(name) {
-    this.name = name;
-  }
-  next() {
-    return this;
-  }
-}
-class PendingState extends LoanState {
-  constructor() {
-    super("Pending");
-  }
-  next() {
-    return new ApprovedState();
-  }
-}
-class ApprovedState extends LoanState {
-  constructor() {
-    super("Approved");
-  }
-  next() {
-    return new DisbursedState();
-  }
-}
-class DisbursedState extends LoanState {
-  constructor() {
-    super("Disbursed");
-  }
-  next() {
-    return new ClosedState();
-  }
-}
-class ClosedState extends LoanState {
-  constructor() {
-    super("Closed");
-  }
-}
+    body {
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      margin:0; padding:0;
+      color: var(--text-dark);
+    }
 
-/**************** React Component ****************/
-export default function BankingApp() {
-  const [username, setUsername] = useState("");
-  const [userType, setUserType] = useState(null); // 'user' or 'admin'
+    header {
+      background: var(--primary);
+      color: white;
+      padding: 15px 20px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      box-shadow:0 2px 4px rgba(0,0,0,0.1);
+    }
 
-  const [notifications, setNotifications] = useState([]);
-  useEffect(() => {
-    const unsub = notificationCenter.subscribe((msg) =>
-      setNotifications((prev) => [msg, ...prev].slice(0, 20))
-    );
-    return () => unsub();
-  }, []);
+    header h1 { margin:0; font-size:1.5em; }
 
-  const [accounts] = useState([
-    AccountFactory.create("Savings", 25000)
-  ]);
-  const [expenses, setExpenses] = useState([
-    { category: "Food", amount: 2500 },
-    { category: "Transport", amount: 800 },
-    { category: "Bills", amount: 1200 }
-  ]);
-  const [bills, setBills] = useState([]);
+    .container { max-width:1200px; margin:auto; padding:20px; }
 
-  const [loans, setLoans] = useState([]);
-  const getLoans = () => loans;
+    .card {
+      background: var(--card-bg);
+      padding:20px;
+      border-radius:10px;
+      margin-bottom:20px;
+      box-shadow:0 4px 10px rgba(0,0,0,0.05);
+    }
 
-  const [loanForm, setLoanForm] = useState({
-    type: "Personal",
-    amount: "",
-    termMonths: 12,
-    strategy: "reducingBalance"
+    button {
+      padding:6px 12px;
+      border:none;
+      border-radius:5px;
+      cursor:pointer;
+      font-weight:bold;
+    }
+
+    .btn-primary { background: var(--secondary); color:white; }
+    .btn-danger { background: var(--danger); color:white; }
+    .btn-success { background: var(--success); color:white; }
+
+    input, select {
+      padding:8px;
+      margin:5px 0;
+      width:100%;
+      border:1px solid #D1D5DB;
+      border-radius:5px;
+      font-size:0.95em;
+    }
+
+    .flex { display:flex; gap:10px; flex-wrap:wrap; }
+
+    .notification {
+      background:#E5E7EB;
+      padding:6px 10px;
+      margin:3px 0;
+      border-radius:5px;
+      font-size:0.9em;
+      color: var(--text-dark);
+    }
+
+    ul { list-style:none; padding:0; }
+    li { margin:5px 0; }
+
+    h2 { color: var(--primary); margin-bottom:10px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>BlueRiver Bank Demo</h1>
+  <div>
+    <select id="roleSelect">
+      <option value="user">User</option>
+      <option value="admin">Admin</option>
+    </select>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- User Dashboard -->
+  <div id="userDashboard">
+    <div class="card">
+      <h2>Accounts</h2>
+      <ul id="accountList"></ul>
+    </div>
+
+    <div class="card">
+      <h2>Apply Loan</h2>
+      <input type="number" id="loanAmount" placeholder="Loan Amount">
+      <select id="loanTerm">
+        <option value="12">12 Months</option>
+        <option value="24">24 Months</option>
+        <option value="36">36 Months</option>
+      </select>
+      <button class="btn-primary" onclick="applyLoan()">Apply Loan</button>
+    </div>
+
+    <div class="card">
+      <h2>Pay Bill</h2>
+      <input type="text" id="billType" placeholder="Bill Type">
+      <input type="number" id="billAmount" placeholder="Amount">
+      <button class="btn-primary" onclick="payBill()">Pay Bill</button>
+    </div>
+
+    <div class="card">
+      <h2>Spending Analytics</h2>
+      <canvas id="spendingChart"></canvas>
+    </div>
+
+    <div class="card">
+      <h2>Notifications</h2>
+      <div id="notifications"></div>
+    </div>
+  </div>
+
+  <!-- Admin Dashboard -->
+  <div id="adminDashboard" style="display:none;">
+    <div class="card">
+      <h2>Loan Requests</h2>
+      <ul id="loanRequests"></ul>
+      <button class="btn-danger" onclick="undoLast()">Undo Last Action</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Data storage
+  let accounts = [{id:'acc1', name:'Savings', balance:50000}];
+  let loans = [];
+  let bills = [];
+  let notifications = [];
+  let commandHistory = [];
+
+  // Update account list
+  function renderAccounts() {
+    const ul = document.getElementById('accountList');
+    ul.innerHTML = '';
+    accounts.forEach(a => {
+      const li = document.createElement('li');
+      li.textContent = `${a.name}: ₹${a.balance}`;
+      ul.appendChild(li);
+    });
+  }
+
+  // Notifications (Observer pattern)
+  function notify(msg) {
+    notifications.unshift(msg);
+    if(notifications.length>10) notifications.pop();
+    const div = document.getElementById('notifications');
+    div.innerHTML = '';
+    notifications.forEach(n => {
+      const el = document.createElement('div');
+      el.className='notification';
+      el.textContent = n;
+      div.appendChild(el);
+    });
+  }
+
+  // Apply Loan
+  function applyLoan() {
+    const amt = Number(document.getElementById('loanAmount').value);
+    const term = Number(document.getElementById('loanTerm').value);
+    if(!amt || !term) return alert('Enter valid loan');
+    const loan = {id:Date.now(), amount:amt, term:term, status:'Pending'};
+    loans.push(loan);
+    notify(`Loan applied: ₹${amt}`);
+    renderLoanRequests();
+  }
+
+  // Admin actions (Command pattern)
+  function approveLoan(id) {
+    const loan = loans.find(l=>l.id===id);
+    if(!loan) return;
+    const prevStatus = loan.status;
+    loan.status = 'Approved';
+    commandHistory.push({loan, prevStatus});
+    notify(`Loan ${id} Approved`);
+    renderLoanRequests();
+  }
+
+  function rejectLoan(id) {
+    const loan = loans.find(l=>l.id===id);
+    if(!loan) return;
+    const prevStatus = loan.status;
+    loan.status = 'Rejected';
+    commandHistory.push({loan, prevStatus});
+    notify(`Loan ${id} Rejected`);
+    renderLoanRequests();
+  }
+
+  function undoLast() {
+    const last = commandHistory.pop();
+    if(!last) return;
+    last.loan.status = last.prevStatus;
+    notify(`Undo: Loan ${last.loan.id} reverted to ${last.prevStatus}`);
+    renderLoanRequests();
+  }
+
+  // Render loan requests (Admin)
+  function renderLoanRequests() {
+    const ul = document.getElementById('loanRequests');
+    ul.innerHTML = '';
+    loans.forEach(l => {
+      const li = document.createElement('li');
+      li.textContent = `ID:${l.id} Amount:₹${l.amount} Status:${l.status} `;
+      const approveBtn = document.createElement('button');
+      approveBtn.textContent='Approve'; approveBtn.className='btn-primary'; approveBtn.onclick=()=>approveLoan(l.id);
+      const rejectBtn = document.createElement('button');
+      rejectBtn.textContent='Reject'; rejectBtn.className='btn-danger'; rejectBtn.onclick=()=>rejectLoan(l.id);
+      li.appendChild(approveBtn);
+      li.appendChild(rejectBtn);
+      ul.appendChild(li);
+    });
+  }
+
+  // Pay Bill
+  function payBill() {
+    const type = document.getElementById('billType').value;
+    const amt = Number(document.getElementById('billAmount').value);
+    if(!type || !amt) return alert('Enter valid bill info');
+    bills.push({type, amt, date:new Date().toLocaleDateString()});
+    notify(`Bill Paid: ${type} ₹${amt}`);
+  }
+
+  // Spending chart
+  function renderChart() {
+    const ctx = document.getElementById('spendingChart').getContext('2d');
+    const data = {
+      labels: ['Food','Transport','Bills'],
+      datasets: [{
+        label:'Spending',
+        data: [2500,800,1200],
+        backgroundColor:['#2563EB','#1E40AF','#F59E0B']
+      }]
+    };
+    new Chart(ctx,{type:'pie',data});
+  }
+
+  // Toggle dashboards
+  document.getElementById('roleSelect').addEventListener('change', e=>{
+    const role = e.target.value;
+    document.getElementById('userDashboard').style.display = role==='user'?'block':'none';
+    document.getElementById('adminDashboard').style.display = role==='admin'?'block':'none';
   });
 
-  const calculateEMI = (amount, months, strategyKey) => {
-    const principal = Number(amount) || 0;
-    const n = Number(months) || 0;
-    const annualRate = 10;
-    if (n <= 0) return 0;
-    const fn =
-      EMIStrategies[strategyKey] || EMIStrategies.reducingBalance;
-    return Math.max(0, fn(principal, annualRate, n));
-  };
+  // Init
+  renderAccounts();
+  renderChart();
+  renderLoanRequests();
+</script>
 
-  const applyLoan = () => {
-    const id = Date.now();
-    const emi = calculateEMI(
-      loanForm.amount,
-      loanForm.termMonths,
-      loanForm.strategy
-    );
-    const now = new Date();
-    const nextDue = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      now.getDate()
-    ).toLocaleDateString();
-    const loan = {
-      id,
-      applicant: username || "Guest",
-      type: loanForm.type,
-      amount: Number(loanForm.amount) || 0,
-      termMonths: Number(loanForm.termMonths) || 0,
-      emi: Number(emi.toFixed(2)),
-      appliedOn: now.toLocaleDateString(),
-      nextDue,
-      status: "Pending",
-      state: new PendingState(),
-      stateName: "Pending",
-      remark: ""
-    };
-    setLoans((prev) => [loan, ...prev]);
-    notificationCenter.notify(
-      `Loan applied (ID ${loan.id}) by ${loan.applicant}`
-    );
-    setLoanForm({ ...loanForm, amount: "", termMonths: 12 });
-  };
-
-  const approveLoan = (loanId) => {
-    const cmd = new UpdateLoanCommand(
-      getLoans,
-      setLoans,
-      loanId,
-      "Approved",
-      "Approved",
-      "Approved by Admin"
-    );
-    invoker.execute(cmd);
-  };
-  const rejectLoan = (loanId) => {
-    const cmd = new UpdateLoanCommand(
-      getLoans,
-      setLoans,
-      loanId,
-      "Rejected",
-      "Rejected",
-      "Rejected by Admin"
-    );
-    invoker.execute(cmd);
-  };
-  const undoLast = () => invoker.undo();
-
-  const advanceLoanState = (loanId) => {
-    setLoans((prev) =>
-      prev.map((l) => {
-        if (l.id !== loanId) return l;
-        const currState = l.state || new PendingState();
-        const nextState = currState.next();
-        const nextName = nextState.name || l.stateName;
-        const newStatus =
-          nextName === "Disbursed"
-            ? "Disbursed"
-            : nextName === "Closed"
-            ? "Closed"
-            : l.status;
-        notificationCenter.notify(
-          `Loan ${loanId} state -> ${nextName}`
-        );
-        return {
-          ...l,
-          state: nextState,
-          stateName: nextName,
-          status: newStatus
-        };
-      })
-    );
-  };
-
-  const payBill = (type, amount) => {
-    const id = Date.now();
-    const receipt = {
-      id,
-      type,
-      amount,
-      date: new Date().toLocaleString()
-    };
-    setBills((prev) => [receipt, ...prev]);
-    setExpenses((prev) => [
-      ...prev,
-      { category: type, amount: Number(amount) }
-    ]);
-    notificationCenter.notify(`${type} bill paid: ₹${amount}`);
-  };
-
-  const calculateFD = (principal, annualRatePercent, years) => {
-    const p = Number(principal) || 0;
-    const r = Number(annualRatePercent) || 0;
-    const t = Number(years) || 0;
-    return p * Math.pow(1 + r / 100, t);
-  };
-
-  const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff8042"];
-
-  /********************* UI *********************/
-  if (!userType) {
-    return (
-      <div style={{ padding: "20px" }}>
-        <h2>Banking App - Login</h2>
-        <input
-          placeholder="Enter Name"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <br />
-        <button onClick={() => setUserType("user")}>Login as User</button>
-        <button onClick={() => setUserType("admin")}>Login as Admin</button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: "20px" }}>
-      <h2>Welcome {username} ({userType})</h2>
-      <button onClick={() => setUserType(null)}>Logout</button>
-
-      <hr />
-      <h3>Accounts</h3>
-      {accounts.map((a) => (
-        <div key={a.id} className="card">
-          {a.type} Account - Balance: ₹{a.balance}
-        </div>
-      ))}
-
-      {userType === "user" && (
-        <>
-          <hr />
-          <h3>Apply Loan</h3>
-          <input
-            placeholder="Amount"
-            value={loanForm.amount}
-            onChange={(e) =>
-              setLoanForm({ ...loanForm, amount: e.target.value })
-            }
-          />
-          <input
-            placeholder="Term (months)"
-            value={loanForm.termMonths}
-            onChange={(e) =>
-              setLoanForm({ ...loanForm, termMonths: e.target.value })
-            }
-          />
-          <select
-            value={loanForm.strategy}
-            onChange={(e) =>
-              setLoanForm({ ...loanForm, strategy: e.target.value })
-            }
-          >
-            <option value="reducingBalance">Reducing Balance</option>
-            <option value="flatRate">Flat Rate</option>
-          </select>
-          <button onClick={applyLoan}>Apply</button>
-
-          <hr />
-          <h3>Bill Payment</h3>
-          <button onClick={() => payBill("Electricity", 1500)}>
-            Pay Electricity ₹1500
-          </button>
-          <button onClick={() => payBill("Mobile", 500)}>
-            Pay Mobile ₹500
-          </button>
-
-          <hr />
-          <h3>FD Calculator</h3>
-          <div>
-            Example: ₹10,000 for 3 years @6% = ₹
-            {calculateFD(10000, 6, 3).toFixed(2)}
-          </div>
-
-          <hr />
-          <h3>Spending Analytics</h3>
-          <PieChart width={400} height={300}>
-            <Pie
-              data={expenses}
-              dataKey="amount"
-              nameKey="category"
-              outerRadius={100}
-              fill="#8884d8"
-              label
-            >
-              {expenses.map((entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={COLORS[index % COLORS.length]}
-                />
-              ))}
-            </Pie>
-            <Tooltip />
-            <Legend />
-          </PieChart>
-        </>
-      )}
-
-      {userType === "admin" && (
-        <>
-          <hr />
-          <h3>Loan Management</h3>
-          <button onClick={undoLast}>Undo Last Action</button>
-          {loans.map((loan) => (
-            <div key={loan.id} className="card">
-              <b>{loan.type}</b> Loan ₹{loan.amount} by {loan.applicant} <br />
-              Status: {loan.status}, State: {loan.stateName}, EMI: ₹{loan.emi} <br />
-              <button onClick={() => approveLoan(loan.id)}>Approve</button>
-              <button onClick={() => rejectLoan(loan.id)}>Reject</button>
-              <button onClick={() => advanceLoanState(loan.id)}>
-                Next State
-              </button>
-            </div>
-          ))}
-        </>
-      )}
-
-      <hr />
-      <h3>Notifications</h3>
-      <ul>
-        {notifications.map((n, i) => (
-          <li key={i}>{n}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+</body>
+</html>
